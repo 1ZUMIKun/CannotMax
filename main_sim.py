@@ -4,6 +4,8 @@ import tkinter as tk
 # from tkinter import messagebox # messagebox 已被自定义提示替代，可以注释或移除
 from PIL import Image, ImageTk
 import math
+import cv2 # Import OpenCV
+import numpy as np # Import numpy for image manipulation
 from simulator.battle_field import Battlefield  # 确保 Battlefield 已导入
 from simulator.monsters import MonsterFactory  # 确保 MonsterFactory 已导入
 from simulator.utils import MONSTER_MAPPING, REVERSE_MONSTER_MAPPING, Faction  # 根据你的实际路径调整
@@ -125,7 +127,9 @@ class SandboxSimulator:
 
         self.message_label = None  # 用于显示提示信息的标签
         self.message_timer_id = None  # 用于定时清除提示信息的ID
+        self.background_image_tk = None # To hold the transformed background image for Tkinter
 
+        self.load_and_transform_background() # Load and transform background image
         self.create_widgets()
         self.master.protocol("WM_DELETE_WINDOW", self.hide_window)
         self.state_machine = StateMachine(self.update_ui_state)
@@ -256,7 +260,7 @@ class SandboxSimulator:
 
         self.canvas = tk.Canvas(self.master, width=self.canvas_width, height=self.canvas_height, bg='white')
         self.canvas.pack(pady=10)
-        self.draw_grid()
+        # self.draw_grid() # Grid will be drawn in refresh_canvas_display after background
 
         self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
@@ -294,43 +298,107 @@ class SandboxSimulator:
             self.speed_entry.delete(0, tk.END)
             self.speed_entry.insert(0, str(self.speed_multiplier))
 
+    def load_and_transform_background(self):
+        try:
+            # Load the image using OpenCV
+            img = cv2.imread('battlefield.png')
+            if img is None:
+                print("错误: 无法读取 battlefield.png 文件！")
+                return
+
+            # Define source points (corners of the trapezoid in the original image)
+            # These are example points, you might need to adjust them based on your image
+            # Assuming the trapezoid is at the bottom of the image, wider at the bottom
+            rows, cols, ch = img.shape
+            # Example points: bottom-left, bottom-right, top-right, top-left
+            src_points = np.float32([[0, rows*0.95], [cols, rows*0.95], [cols * 0.85, rows * 0.1], [cols * 0.15, rows * 0.1]])
+
+            # Define destination points (corners of the rectangle after transformation)
+            # These should map to the desired area on your canvas
+            # Assuming you want to map it to the full canvas size
+            dst_points = np.float32([[0, self.canvas_height], [self.canvas_width, self.canvas_height], [self.canvas_width, 0], [0, 0]])
+
+            # Get the perspective transformation matrix
+            matrix = cv2.getPerspectiveTransform(src_points, dst_points)
+
+            # Apply the perspective transformation
+            transformed_img = cv2.warpPerspective(img, matrix, (self.canvas_width, self.canvas_height))
+
+            # Convert the OpenCV image (BGR) to a PIL image (RGB)
+            transformed_img_rgb = cv2.cvtColor(transformed_img, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(transformed_img_rgb)
+
+            # Convert the PIL image to a Tkinter PhotoImage
+            self.background_image_tk = ImageTk.PhotoImage(pil_image)
+
+        except FileNotFoundError:
+            print("错误: battlefield.png 未找到，请检查路径！")
+        except Exception as e:
+            print(f"加载或变换背景图片时发生错误: {str(e)}")
+
     def draw_grid(self):
+        # Draw the transformed background image first
+        if self.background_image_tk and self.canvas:
+            self.canvas.create_image(0, 0, image=self.background_image_tk, anchor=tk.NW, tags="background")
+
         danger_zone = 0
         if self.battle_field and self.battle_field.danger_zone_size() > 0:
             danger_zone = min(self.battle_field.danger_zone_size(), self.grid_height / 2 + 1)
             self.canvas.create_rectangle(0, 0, self.canvas_width, danger_zone * self.cell_size, fill='#cccc00',
-                                         outline="")
+                                         outline="", tags="grid")
             self.canvas.create_rectangle(0, 0, (danger_zone+1) * self.cell_size , self.canvas_height, fill='#cccc00',
-                                         outline="")
+                                         outline="", tags="grid")
             self.canvas.create_rectangle(self.canvas_width, 0, self.canvas_width - (danger_zone+1) * self.cell_size,
-                                         self.canvas_height, fill='#cccc00', outline="")
+                                         self.canvas_height, fill='#cccc00', outline="", tags="grid")
             self.canvas.create_rectangle(self.canvas_width, self.canvas_height, 0,
-                                         self.canvas_height - danger_zone * self.cell_size, fill='#cccc00', outline="")
+                                         self.canvas_height - danger_zone * self.cell_size, fill='#cccc00', outline="", tags="grid")
 
-        # 绘制最左侧的红色列
-        self.canvas.create_rectangle(0, 0, self.cell_size, self.canvas_height, fill='red', outline="")
-        # 绘制最右侧的蓝色列
-        self.canvas.create_rectangle(self.canvas_width - self.cell_size, 0, self.canvas_width, self.canvas_height,
-                                     fill='blue', outline="")
+        # 绘制最左侧的柔和红色列 (半透明)
+        soft_red_fill_rgb = (0xF0, 0x80, 0x80)  # 亮珊瑚色 RGB
+        alpha = 128  # 半透明 (0-255)
+        red_column_image = Image.new('RGBA', (self.cell_size, self.canvas_height), soft_red_fill_rgb + (alpha,))
+        self.red_column_photo = ImageTk.PhotoImage(red_column_image)
+        self.canvas.create_image(0, 0, image=self.red_column_photo, anchor=tk.NW, tags="grid")
+
+        # 绘制最右侧的柔和蓝色列 (半透明)
+        soft_blue_fill_rgb = (0xAD, 0xD8, 0xE6)  # 浅蓝色 RGB
+        blue_column_image = Image.new('RGBA', (self.cell_size, self.canvas_height), soft_blue_fill_rgb + (alpha,))
+        self.blue_column_photo = ImageTk.PhotoImage(blue_column_image)
+        self.canvas.create_image(self.canvas_width - self.cell_size, 0, image=self.blue_column_photo, anchor=tk.NW, tags="grid")
+
+        soft_red_line = '#D87070'  # 稍暗的亮珊瑚色
+        soft_blue_line = '#9CC2D0'  # 稍暗的浅蓝色
 
         for i in range(self.grid_width + 1):
             x = i * self.cell_size
             if i == 0 or i == self.grid_width:
                 continue
             if i == 1:  # 红色列的右边缘线
-                self.canvas.create_line(x, 0, x, self.canvas_height, fill='darkred')
+                self.canvas.create_line(x, 0, x, self.canvas_height, fill=soft_red_line, tags="grid")
             elif i == self.grid_width - 1:  # 蓝色列的左边缘线
-                self.canvas.create_line(x, 0, x, self.canvas_height, fill='darkblue')
+                self.canvas.create_line(x, 0, x, self.canvas_height, fill=soft_blue_line, tags="grid")
             else:
-                self.canvas.create_line(x, 0, x, self.canvas_height, fill='lightgray')
+                self.canvas.create_line(x, 0, x, self.canvas_height, fill='lightgray', tags="grid")  # 垂直网格线
+
+        # 绘制水平网格线
         for i in range(self.grid_height + 1):
             y = i * self.cell_size
-            self.canvas.create_line(0, y, self.canvas_width, y, fill='lightgray')
+            # 左边红色区域的水平线可以特殊处理，使其在红色背景上更明显，或者保持lightgray
+            if self.cell_size > 0:  # 确保 cell_size > 0 避免问题
+                # 在红色区域内绘制颜色稍浅的水平线，或者使用对比色
+                self.canvas.create_line(0, y, self.cell_size, y, fill='#E07070', tags="grid")  # 示例：红色区域内的水平线
+                # 在蓝色区域内绘制颜色稍浅的水平线
+                self.canvas.create_line(self.canvas_width - self.cell_size, y, self.canvas_width, y,
+                                        fill='#9CBED0', tags="grid")  # 示例：蓝色区域内的水平线
+                # 中间区域的水平线
+                self.canvas.create_line(self.cell_size, y, self.canvas_width - self.cell_size, y, fill='lightgray', tags="grid")
+            else:  # 如果 cell_size 为0或负，则绘制完整线条
+                self.canvas.create_line(0, y, self.canvas_width, y, fill='lightgray', tags="grid")
 
     def refresh_canvas_display(self):
         if not self.canvas: return
-        self.canvas.delete("all")
-        self.draw_grid()
+        self.canvas.delete("all") # Clear everything, including the background
+        self.draw_grid() # Redraw grid and background
         self.canvas.delete("victory_text")  # 清除可能存在的胜利信息
 
         if len(self.battle_field.monsters) > len(self.units):
@@ -575,6 +643,9 @@ def main():
 
     problematic_monsters_found = []
     problematic_monster_names = ["矿脉守卫", "鳄鱼", "凋零萨卡兹", "1750哥", "高能源石虫"]
+    """
+    高估王庭，高估大运，高估鳄鱼，低估矿脉
+    """
 
     for team_key in ["left", "right"]:
         for monster_name in initial_battle_setup.get(team_key, {}):

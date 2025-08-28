@@ -3,8 +3,7 @@ import os
 import cv2
 import numpy as np
 from PIL import ImageGrab
-from rapidocr import RapidOCR
-from sympy import false
+import rapidocr
 
 import find_monster_zone
 
@@ -44,7 +43,7 @@ def get_rapidocr_engine(prefer_gpu=True):
         if prefer_gpu:
             import torch
             if torch.cuda.is_available():
-                return RapidOCR(
+                return rapidocr.RapidOCR(
                     params={
                         "Global.with_torch": True,
                         "EngineConfig.torch.use_cuda": True,  # 使用torch GPU版推理
@@ -54,7 +53,7 @@ def get_rapidocr_engine(prefer_gpu=True):
     except ImportError:
         logger.warning("torch库未安装，使用onnxruntime")
     # 如果没有GPU可用，使用CPU onnxruntime
-    return RapidOCR()
+    return rapidocr.RapidOCR()
 
 class RecognizeMonster:
     def __init__(self):
@@ -116,6 +115,7 @@ class RecognizeMonster:
                 self.roi_box = []
                 continue
 
+    @staticmethod
     def find_best_match(target: cv2.typing.MatLike, ref_images: dict[int, cv2.typing.MatLike]):
         """
         模板匹配找到最佳匹配的参考图像
@@ -274,9 +274,13 @@ class RecognizeMonster:
                     {"region_id": idx, "matched_id": matched_id, "number": "N/A", "error": str(e)}
                 )
         return results
-    
+
     def do_num_ocr(self, img: cv2.typing.MatLike):
         result = self.rapidocr_eng(img, use_det=False, use_cls=False, use_rec=True)
+        if result is not rapidocr.utils.typings.RapidOCROutput:
+            raise ValueError(f"OCR识别结果错误: '{result}'")
+        if result.txts is None:
+            raise ValueError(f"OCR识别结果错误: '{result}'")
         logger.info(f"OCR: text: '{result.txts[0]}', score: {result.scores[0]}")
         if result.txts[0] != "" and not result.txts[0].isdigit():
             raise ValueError(f"OCR识别结果不是数字: '{result.txts[0]}'")
@@ -345,10 +349,10 @@ def preprocess(img: cv2.typing.MatLike):
         x, y, w, h = cv2.boundingRect(contour)
         if w <= 1:
             # 用黑色填充宽度小于等于1的区域
-            cv2.drawContours(closed, [contour], -1, 0, thickness=cv2.FILLED)
+            cv2.drawContours(closed, [contour], -1, (0, 0, 0), thickness=cv2.FILLED)
         if h <= 13:
             # 用黑色填充高度小于等于13的区域
-            cv2.drawContours(closed, [contour], -1, 0, thickness=cv2.FILLED)
+            cv2.drawContours(closed, [contour], -1, (0, 0, 0), thickness=cv2.FILLED)
 
     return closed
 
@@ -414,14 +418,14 @@ if __name__ == "__main__":
     print("请用鼠标拖拽选择主区域...")
     recognizer = RecognizeMonster()
     main_roi = recognizer.select_roi()
-    results, _ = recognizer.process_regions(main_roi)
-    # 输出结果
-    print("\n识别结果：")
-    for res in results:
-        if "error" in res:
-            print(f"区域{res['region_id']}: 错误 - {res['error']}")
-        else:
-            if res["matched_id"] != 0:
-                print(
-                    f"区域{res['region_id']} => 匹配ID:{res['matched_id']} 数字:{res['number']} 置信度:{res['confidence']}"
-                )
+    # results, _ = recognizer.process_regions(main_roi)
+    # # 输出结果
+    # print("\n识别结果：")
+    # for res in results:
+    #     if "error" in res:
+    #         print(f"区域{res['region_id']}: 错误 - {res['error']}")
+    #     else:
+    #         if res["matched_id"] != 0:
+    #             print(
+    #                 f"区域{res['region_id']} => 匹配ID:{res['matched_id']} 数字:{res['number']} 置信度:{res['confidence']}"
+    #             )

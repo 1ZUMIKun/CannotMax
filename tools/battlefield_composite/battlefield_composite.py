@@ -201,7 +201,7 @@ def composite_random_frame():
     cv2.imwrite("./tools/battlefield_composite/battlefield_composite.png", battlefield)
 
 
-def crop_to_bounding_box(image):
+def crop_to_bounding_box(image: cv2.typing.MatLike):
     """
     将图像裁切到非透明像素的外接矩形。
 
@@ -215,7 +215,8 @@ def crop_to_bounding_box(image):
     if image.shape[2] < 4:
         # 如果没有alpha通道，则无法进行基于透明度的裁切
         print("警告: 图像不包含alpha通道，无法进行基于透明度的裁切。返回原图。")
-        return image
+        center = (image.shape[1], image.shape[0])
+        return image, center
 
     # 获取alpha通道
     alpha_channel = image[:, :, 3]
@@ -228,7 +229,8 @@ def crop_to_bounding_box(image):
     # 如果没有非透明像素，返回原图
     if coords is None:
         print("警告: 图像中没有非透明像素。返回原图。")
-        return image
+        center = (image.shape[1], image.shape[0])
+        return image, center
 
     # 计算外接矩形
     x, y, w, h = cv2.boundingRect(coords)
